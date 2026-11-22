@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<style>
+:root{--bg:#fff7fb;--card:#fff;--line:#f7c9de;--tx:#3a1a2b;--mu:#8f6277;--ac:#e0287d}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font-family:system-ui,sans-serif}
+#app{max-width:720px;margin:0 auto;padding:14px}
+h1{font-size:22px;margin:6px 0 10px}h2{font-size:18px;margin:14px 0 8px}
+.tabs{display:flex;gap:6px;overflow-x:auto;margin-bottom:12px}
+.tabs button{border:1px solid var(--line);background:#fff;border-radius:18px;padding:8px 14px;font-weight:700;color:var(--mu);white-space:nowrap}
+.tabs button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px;margin-bottom:10px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.btn{border:0;border-radius:16px;padding:8px 14px;font-weight:700;background:var(--ac);color:#fff;cursor:pointer}
+.btn.s{background:#fbd0e4;color:#a0155c}.btn.r{background:#b3261e}
+input,select,textarea{width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);margin:4px 0 8px;font:inherit;background:#fff;color:var(--tx)}
+.mu{color:var(--mu);font-size:13px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.k{font-size:22px;font-weight:800}.badge{font-size:12px;padding:2px 8px;border-radius:10px;background:#fde7f1}
+.toast{position:fixed;top:12px;left:50%;transform:translateX(-50%);background:var(--ac);color:#fff;padding:8px 16px;border-radius:16px;font-weight:700;z-index:9}
+</style></head><body><div id="app"></div>
+<script>
+const sb=supabase.createClient("https://dnayhsdlgjabxvwchxap.supabase.co","sb_publishable__cbb6UTRST6ZCOidVFYgog_xeS6bOmh");
+const $=id=>document.getElementById(id),N=n=>"₦"+Number(n||0).toLocaleString(),
+ esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let me,tab="over",D={tasks:[],wd:[],users:[],set:{}},q="";
+function toast(t){const d=document.createElement("div");d.className="toast";d.textContent=t;document.body.appendChild(d);setTimeout(()=>d.remove(),2500)}
+async function load(){
+ const{data:{session}}=await sb.auth.getSession();
+ if(!session){me=null;return draw()}
+ const{data:p}=await sb.from("profiles").select("*").eq("id",session.user.id).single();
+ me=p||{};if(!me.is_admin)return draw();
+ const[t,w,u,s]=await Promise.all([sb.from("tasks").select("*").order("id"),sb.from("withdrawals").select("*").order("created_at",{ascending:false}),sb.from("profiles").select("*").order("created_at",{ascending:false}),sb.from("settings").select("*")]);
+ D.tasks=t.data||[];D.wd=w.data||[];D.users=u.data||[];D.set={};(s.data||[]).forEach(x=>D.set[x.key]=x.value);draw()}
+async function login(){const{error}=await sb.auth.signInWithPassword({email:$("em").value.trim(),password:$("pw").value});if(error)return toast(error.message);load()}
+async function out(){await sb.auth.signOut();me=null;draw()}
+async function rpc(fn,a,ok){const{error}=await sb.rpc(fn,a);if(error)return toast(error.message);toast(ok);load()}
+async function addTask(){const v=id=>$(id).value.trim();if(!v("tt"))return toast("Enter a title");
+ const{error}=await sb.from("tasks").insert({key:"t"+Date.now(),title:v("tt"),description:v("td"),link:v("tl"),reward:+v("tr")||0,kind:$("tk").value,seconds:+v("ts")||0});
+ if(error)return toast(error.message);toast("Task added");load()}
+async function toggleTask(id,a){const{error}=await sb.from("tasks").update({active:a}).eq("id",id);if(error)return toast(error.message);load()}
+async function delTask(id){if(!confirm("Delete this task?"))return;const{error}=await sb.from("tasks").delete().eq("id",id);if(error)return toast(error.message);load()}
+async function editTask(id){const t=D.tasks.find(x=>x.id===id),f={};
+ for(const[k,l]of[["title","Title"],["description","Description"],["link","Link"],["reward","Reward"]]){const v=prompt(l,t[k]??"");if(v===null)return;f[k]=k==="reward"?+v||0:v}
+ const{error}=await sb.from("tasks").update(f).eq("id",id);if(error)return toast(error.message);toast("Saved");load()}
+function setWd(id,s){if(s==="rejected"&&!confirm("Refund this amount to the user?"))return;rpc("admin_set_withdrawal",{wid:id,s},s==="paid"?"Marked paid":"Rejected and refunded")}
+function ban(id,f){rpc("admin_set_banned",{uid:id,flag:f},"Done")}
+function adj(id){const a=prompt("Amount to add (use - to subtract)");if(!a||!+a)return;const n=prompt("Note (optional)")||"";rpc("admin_adjust_balance",{uid:id,amt:+a,note:n},"Balance updated")}
+async function saveSet(){const{error}=await sb.from("settings").upsert([{key:"min_withdrawal",value:+$("smin").value},{key:"referral_bonus",value:+$("sbon").value}]);if(error)return toast(error.message);toast("Settings saved");load()}
+const userList=()=>D.users.filter(u=>((u.name||"")+" "+(u.email||"")+" "+(u.code||"")).toLowerCase().includes(q.toLowerCase())).map(u=>`<div class="card"><div class="row"><b>${esc(u.name)}${u.is_admin?" (admin)":""}</b><span class="badge">${N(u.balance)}${u.banned?" · banned":""}</span></div><div class="mu">${esc(u.email)} · code ${esc(u.code)} · earned ${N(u.earned)}</div><div class="row" style="margin-top:8px"><button class="btn s" onclick="adj('${u.id}')">Adjust balance</button><button class="btn ${u.banned?"":"r"}" onclick="ban('${u.id}',${!u.banned})">${u.banned?"Unban":"Ban"}</button></div></div>`).join("")||'<p class="mu">No users.</p>';
+function view(){
+ if(me===undefined)return "";
+ if(!me)return `<h1>Admin login</h1><div class="card"><label class="mu">Email</label><input id="em"><label class="mu">Password</label><input id="pw" type="password"><button class="btn" onclick="login()">Log in</button></div>`;
+ if(!me.is_admin)return `<h1>Not an admin</h1><div class="card"><p class="mu">This account does not have admin access.</p><button class="btn" onclick="out()">Log out</button></div>`;
+ const um={};D.users.forEach(u=>um[u.id]=u);const pend=D.wd.filter(w=>w.status==="pending");
+ let b=`<div class="row"><h1>Admin</h1><button class="btn s" onclick="out()">Log out</button></div><div class="tabs">${[["over","Overview"],["wd","Withdrawals"],["tasks","Tasks"],["users","Users"],["set","Settings"]].map(t=>`<button class="${tab===t[0]?"on":""}" onclick="tab='${t[0]}';draw()">${t[1]}${t[0]==="wd"&&pend.length?" ("+pend.length+")":""}</button>`).join("")}</div>`;
+ if(tab==="over"){const owed=D.users.reduce((s,u)=>s+u.balance,0),paid=D.wd.filter(w=>w.status==="paid").reduce((s,w)=>s+w.amount,0);
+  b+=`<div class="grid"><div class="card"><div class="mu">Users</div><div class="k">${D.users.length}</div></div><div class="card"><div class="mu">Balances owed</div><div class="k">${N(owed)}</div></div><div class="card"><div class="mu">Pending withdrawals</div><div class="k">${pend.length} · ${N(pend.reduce((s,w)=>s+w.amount,0))}</div></div><div class="card"><div class="mu">Total paid out</div><div class="k">${N(paid)}</div></div></div>`}
+ if(tab==="wd")b+=D.wd.map(w=>{const u=um[w.user_id]||{};return `<div class="card"><div class="row"><b>${N(w.amount)}</b><span class="badge">${esc(w.status)}</span></div><div>${esc(u.name)} · <span class="mu">${esc(u.email)}</span></div><div class="mu">${esc(w.bank)} · ${esc(w.acct_no)} · ${esc(w.acct_name)}<br>${new Date(w.created_at).toLocaleString()}</div>${w.status==="pending"?`<div class="row" style="margin-top:8px"><button class="btn" onclick="setWd(${w.id},'paid')">Mark paid</button><button class="btn r" onclick="setWd(${w.id},'rejected')">Reject &amp; refund</button></div>`:""}</div>`}).join("")||'<p class="mu">No withdrawals yet.</p>';
+ if(tab==="tasks")b+=`<div class="card"><h2 style="margin-top:0">Add task</h2><label class="mu">Title</label><input id="tt"><label class="mu">Description</label><textarea id="td" rows="2"></textarea><label class="mu">Link (optional, e.g. a Telegram channel)</label><input id="tl"><div class="grid"><div><label class="mu">Reward (₦)</label><input id="tr" type="number" value="500"></div><div><label class="mu">Type</label><select id="tk"><option value="link">Open link then claim</option><option value="read">Timed reading</option></select></div></div><label class="mu">Reading seconds (timed only)</label><input id="ts" type="number" value="20"><button class="btn" onclick="addTask()">Add task</button></div>`+D.tasks.map(t=>`<div class="card"><div class="row"><b>${esc(t.title)}</b><span class="badge">${N(t.reward)} · ${esc(t.kind)}${t.active?"":" · hidden"}</span></div><div class="mu">${esc(t.description)}<br>${esc(t.link)}</div><div class="row" style="margin-top:8px"><button class="btn s" onclick="editTask(${t.id})">Edit</button><button class="btn s" onclick="toggleTask(${t.id},${!t.active})">${t.active?"Hide":"Show"}</button><button class="btn r" onclick="delTask(${t.id})">Delete</button></div></div>`).join("");
+ if(tab==="users")b+=`<input placeholder="Search name, email or code" value="${esc(q)}" oninput="q=this.value;$('ul').innerHTML=userList()"><div id="ul">${userList()}</div>`;
+ if(tab==="set")b+=`<div class="card"><label class="mu">Minimum withdrawal (₦)</label><input id="smin" type="number" value="${D.set.min_withdrawal??30000}"><label class="mu">Referral bonus (₦)</label><input id="sbon" type="number" value="${D.set.referral_bonus??500}"><button class="btn" onclick="saveSet()">Save settings</button></div>`;
+ return b}
+function draw(){$("app").innerHTML=view()}
+load();
+</script></body></html>
