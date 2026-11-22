@@ -36,9 +36,9 @@ nav button::after{content:"";display:block;height:3px;margin:5px auto 0;width:70
 </style></head><body><div id="app"></div>
 <script>
 const BRAND="Swagbucks",SUPABASE_URL="https://dnayhsdlgjabxvwchxap.supabase.co",SUPABASE_KEY="sb_publishable__cbb6UTRST6ZCOidVFYgog_xeS6bOmh";
-const MIN=30000,BONUS=500,TG="https://t.me/allverugf";
+let MIN=30000,BONUS=500;
 const sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
-let U=null,P=null,done={},hist=[],wd=[],refs=0,page="home",mode="login",tgOpened=false,readLeft=null,timer=null,busy=false;
+let U=null,P=null,done={},hist=[],wd=[],tasks=[],refs=0,page="home",mode="login",opened={},cur=null,readLeft=null,timer=null;
 const $=id=>document.getElementById(id),N=n=>"₦"+Number(n||0).toLocaleString(),
  esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const ref=(new URLSearchParams(location.search).get("ref")||"").toUpperCase();
@@ -46,22 +46,24 @@ function toast(t){const d=document.createElement("div");d.className="toast";d.te
 async function load(){
  const{data:{session}}=await sb.auth.getSession();U=session&&session.user;
  if(!U){P=null;return draw()}
- const[p,t,l,w]=await Promise.all([sb.from("profiles").select("*").single(),sb.from("tasks_done").select("task"),
-  sb.from("ledger").select("*").order("created_at",{ascending:false}),sb.from("withdrawals").select("*").order("created_at",{ascending:false})]);
- P=p.data;done={};(t.data||[]).forEach(x=>done[x.task]=1);hist=l.data||[];wd=w.data||[];refs=hist.filter(h=>h.reason==="Referral").length;draw()}
+ const[p,t,l,w,tk,st]=await Promise.all([sb.from("profiles").select("*").eq("id",U.id).single(),sb.from("tasks_done").select("task"),
+  sb.from("ledger").select("*").eq("user_id",U.id).order("created_at",{ascending:false}),sb.from("withdrawals").select("*").eq("user_id",U.id).order("created_at",{ascending:false}),
+  sb.from("tasks").select("*").eq("active",true).order("id"),sb.from("settings").select("*")]);
+ P=p.data;tasks=tk.data||[];(st.data||[]).forEach(s=>{if(s.key==="min_withdrawal")MIN=s.value;if(s.key==="referral_bonus")BONUS=s.value});
+ done={};(t.data||[]).forEach(x=>done[x.task]=1);hist=l.data||[];wd=w.data||[];refs=hist.filter(h=>h.reason==="Referral").length;draw()}
 async function auth(){
  const e=$("em").value.trim(),pw=$("pw").value;if(!e||pw.length<6)return toast("Enter email and a 6+ character password");
- busy=true;let r;
- if(mode==="reg"){const n=$("nm").value.trim();if(!n){busy=false;return toast("Enter your name")}
+ let r;
+ if(mode==="reg"){const n=$("nm").value.trim();if(!n)return toast("Enter your name");
   r=await sb.auth.signUp({email:e,password:pw,options:{data:{name:n,ref}}})}
  else r=await sb.auth.signInWithPassword({email:e,password:pw});
- busy=false;if(r.error)return toast(r.error.message);
+ if(r.error)return toast(r.error.message);
  if(!r.data.session)return toast("Check your email to confirm, then log in");
  await load()}
 async function rpc(fn,args,ok){const{error}=await sb.rpc(fn,args);if(error)return toast(error.message.replace(/^.*?:/,""));toast(ok);await load()}
-function openTg(){tgOpened=true;window.open(TG,"_blank");draw()}
-function startRead(){if(done.read||timer)return;readLeft=20;page="read";draw();timer=setInterval(()=>{readLeft--;if(readLeft<=0){clearInterval(timer);timer=null}draw()},1000)}
-async function claimRead(){await rpc("complete_task",{t:"read"},"+"+N(BONUS)+" earned!");page="tasks";draw()}
+function openTask(k){const t=tasks.find(x=>x.key===k);opened[k]=true;if(t&&t.link)window.open(t.link,"_blank");draw()}
+function startRead(k){const t=tasks.find(x=>x.key===k);if(!t||done[k]||timer)return;cur=t;readLeft=t.seconds||20;page="read";draw();timer=setInterval(()=>{readLeft--;if(readLeft<=0){clearInterval(timer);timer=null}draw()},1000)}
+async function claimRead(){await rpc("complete_task",{t:cur.key},"+"+N(cur.reward)+" earned!");page="tasks";draw()}
 function withdraw(){const a=+$("wa").value;rpc("request_withdrawal",{a,b:$("wb").value.trim(),n:$("wn").value.trim(),nm:$("wm").value.trim()},"Withdrawal requested")}
 function link(){return location.origin+location.pathname+"?ref="+P.code}
 function copy(){navigator.clipboard&&navigator.clipboard.writeText(link()).then(()=>toast("Link copied"),()=>toast("Copy it manually"))}
@@ -69,24 +71,26 @@ function go(p){page=p;draw()}
 const I=p=>'<svg viewBox="0 0 24 24">'+p+'</svg>';
 const T=[["home",I('<path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" fill="currentColor"/>'),"Home"],["tasks",I('<path d="M4 6l1.5 1.5L8 5M4 12l1.5 1.5L8 11M4 18l1.5 1.5L8 17M11 6h9M11 12h9M11 18h9"/>'),"Tasks"],["wallet",I('<rect x="3" y="6" width="18" height="14" rx="3"/><path d="M3 10h18"/><circle cx="16.5" cy="15" r="1" fill="currentColor"/>'),"Wallet"],["profile",I('<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/>'),"Profile"]];
 const logo=`<div class="logo"><div class="lg">${esc(BRAND[0])}</div><span>${esc(BRAND)}</span></div>`;
-const taskCard=(k,i,title,sub,btn)=>`<div class="card ${done[k]?'done':''}"><div class="row"><b>${i}. ${title}</b><span class="rw">+${N(BONUS)}</span></div><p class="mu">${sub}</p>${done[k]?'<p class="mu">Completed ✓</p>':btn}</div>`;
+const taskCard=(t,i)=>{const d=done[t.key];let btn="";
+ if(!d)btn=t.kind==="read"?`<button class="btn" onclick="startRead('${t.key}')">Start Reading</button>`:
+  `${t.link?`<button class="btn" onclick="openTask('${t.key}')">Open Link</button> `:""}<button class="btn" style="background:#fbd0e4;color:#a0155c" ${t.link&&!opened[t.key]?"disabled":""} onclick="rpc('complete_task',{t:'${t.key}'},'+'+N(${t.reward})+' earned!')">I Completed the Task</button>`;
+ return `<div class="card ${d?"done":""}"><div class="row"><b>${i+1}. ${esc(t.title)}</b><span class="rw">+${N(t.reward)}</span></div><p class="mu">${esc(t.description)}</p>${d?'<p class="mu">Completed ✓</p>':btn}</div>`};
 function view(){
  if(!U)return `<div class="top">${logo}</div><div class="hero"><h2 style="margin:0 0 6px">${mode==="reg"?"Create account":"Welcome back"}</h2><small>Complete tasks and invite friends to earn. Withdraw from ${N(MIN)}.</small></div>
  <div class="card" style="margin-top:14px">${mode==="reg"&&ref?'<p class="mu">You were invited by a friend 🎉</p>':''}${mode==="reg"?'<label>Full name</label><input id="nm">':''}<label>Email</label><input id="em" type="email"><label>Password</label><input id="pw" type="password">
  <button class="btn w" onclick="auth()">${mode==="reg"?"Register":"Log in"}</button><p class="mu" style="text-align:center;cursor:pointer" onclick="mode='${mode==="reg"?"login":"reg"}';draw()">${mode==="reg"?"Have an account? Log in":"New here? Create account"}</p></div>`;
- if(!P)return `<p class="mu">Loading…</p>`;
+ if(!P)return `<p class="mu">Could not load your account.</p><button class="btn" onclick="sb.auth.signOut().then(load)">Log out</button>`;
  let b=`<div class="top">${logo}<div class="pill">${N(P.balance)}</div></div>`;
- const tgC=taskCard("tg",1,"Telegram Task","Join our Telegram channel, then come back and tap “I Completed the Task”.",`<button class="btn" onclick="openTg()">Join Telegram Channel</button> <button class="btn" style="background:#fbd0e4;color:#a0155c" ${tgOpened?'':'disabled'} onclick="rpc('complete_task',{t:'tg'},'+${N(BONUS)} earned!')">I Completed the Task</button>`);
- const rdC=taskCard("read",2,"Read about our platform","Read about "+esc(BRAND)+", come back and earn instantly.",`<button class="btn" onclick="startRead()">Start Reading</button>`);
+ const tl=tasks.map(taskCard).join("")||'<p class="mu">No tasks right now. Check back soon.</p>';
  if(page==="home")b+=`<div class="hero"><small>Wallet balance</small><div class="big">${N(P.balance)}</div><div class="bar"><i style="width:${Math.min(100,P.balance/MIN*100)}%"></i></div><small>${N(P.balance)} of ${N(MIN)} minimum withdrawal</small><div class="row" style="margin-top:14px"><small>Total earned ${N(P.earned)}</small><button class="btn g" onclick="go('wallet')">↓ Withdraw</button></div></div>
- <div class="stats"><div class="stat"><b>${N(P.earned)}</b><span>Earned</span></div><div class="stat"><b>${Object.keys(done).length}/2</b><span>Tasks done</span></div><div class="stat"><b>${refs}</b><span>Referrals</span></div></div>
- <div class="card row"><div><b>Invite friends</b><div class="mu">Earn ${N(BONUS)} per referral</div></div><button class="btn" onclick="go('refer')">Invite</button></div><h2>Available tasks</h2>${tgC}${rdC}`;
- if(page==="tasks")b+=`<h2>Tasks</h2>${tgC}${rdC}`;
- if(page==="read")b+=`<h2>About ${esc(BRAND)}</h2><div class="card"><p class="mu">${esc(BRAND)} is a rewards platform where you earn by completing simple tasks, joining our community and inviting friends.</p><p class="mu">Each task is credited to your wallet instantly, and you earn ${N(BONUS)} for every friend who registers with your link. Withdraw once you reach ${N(MIN)}.</p>${readLeft>0?`<button class="btn" disabled>Keep reading… ${readLeft}s</button>`:`<button class="btn" onclick="claimRead()">Claim ${N(BONUS)}</button>`}</div>`;
+ <div class="stats"><div class="stat"><b>${N(P.earned)}</b><span>Earned</span></div><div class="stat"><b>${tasks.filter(t=>done[t.key]).length}/${tasks.length}</b><span>Tasks done</span></div><div class="stat"><b>${refs}</b><span>Referrals</span></div></div>
+ <div class="card row"><div><b>Invite friends</b><div class="mu">Earn ${N(BONUS)} per referral</div></div><button class="btn" onclick="go('refer')">Invite</button></div><h2>Available tasks</h2>${tl}`;
+ if(page==="tasks")b+=`<h2>Tasks</h2>${tl}`;
+ if(page==="read"&&cur)b+=`<h2>${esc(cur.title)}</h2><div class="card"><p class="mu">${esc(cur.description)}</p>${readLeft>0?`<button class="btn" disabled>Keep reading… ${readLeft}s</button>`:`<button class="btn" onclick="claimRead()">Claim ${N(cur.reward)}</button>`}</div>`;
  if(page==="refer")b+=`<h2>Refer & Earn</h2><div class="hero"><small>Earn per invited friend</small><div class="big">${N(BONUS)}</div><small>Paid immediately when someone registers through your link.</small></div><div class="card" style="margin-top:14px"><label>Your referral link</label><div class="link">${esc(link())}</div><button class="btn" onclick="copy()">Copy link</button></div><div class="stats" style="grid-template-columns:1fr 1fr"><div class="stat"><b>${refs}</b><span>Friends invited</span></div><div class="stat"><b>${N(refs*BONUS)}</b><span>Referral earnings</span></div></div>`;
  if(page==="wallet")b+=`<h2>Withdraw</h2><div class="hero"><small>Available balance</small><div class="big">${N(P.balance)}</div><small>Minimum withdrawal ${N(MIN)}</small></div><div class="card" style="margin-top:14px">${P.balance<MIN?`<p class="mu">You need ${N(MIN-P.balance)} more to withdraw.</p>`:''}<label>Amount</label><input id="wa" type="number" placeholder="${MIN}"><label>Bank name</label><input id="wb"><label>Account number</label><input id="wn" inputmode="numeric"><label>Account name</label><input id="wm"><button class="btn w" ${P.balance<MIN?'disabled':''} onclick="withdraw()">Withdraw</button></div>
  <div class="card hist"><b>Withdrawals</b>${wd.map(w=>`<div><span>${esc(w.bank)} · ${esc(w.acct_no)}</span><span>${N(w.amount)} · ${esc(w.status)}</span></div>`).join("")||'<p class="mu">None yet.</p>'}</div>`;
- if(page==="profile")b+=`<h2>Profile</h2><div class="card"><b>${esc(P.name)}</b><p class="mu">${esc(P.email)}<br>Referral code: ${esc(P.code)}</p><button class="btn" onclick="sb.auth.signOut().then(load)">Log out</button></div><div class="card hist"><b>Earnings history</b>${hist.map(h=>`<div><span>${esc(h.reason)}<br><small class="mu">${new Date(h.created_at).toLocaleString()}</small></span><b style="color:var(--ac)">+${N(h.amount)}</b></div>`).join("")||'<p class="mu">Nothing yet.</p>'}</div>`;
+ if(page==="profile")b+=`<h2>Profile</h2><div class="card"><b>${esc(P.name)}</b><p class="mu">${esc(P.email)}<br>Referral code: ${esc(P.code)}</p>${P.is_admin?'<a class="btn" style="display:inline-block;text-decoration:none;margin-right:8px" href="admin.html">Admin</a>':''}<button class="btn" onclick="sb.auth.signOut().then(load)">Log out</button></div><div class="card hist"><b>Earnings history</b>${hist.map(h=>`<div><span>${esc(h.reason)}<br><small class="mu">${new Date(h.created_at).toLocaleString()}</small></span><b style="color:var(--ac)">${h.amount<0?"":"+"}${N(h.amount)}</b></div>`).join("")||'<p class="mu">Nothing yet.</p>'}</div>`;
  return b+`<nav>${T.map(t=>`<button class="${page===t[0]?'on':''}" onclick="go('${t[0]}')">${t[1]}${t[2]}</button>`).join("")}</nav>`}
 function draw(){$("app").innerHTML=view()}
 if(ref)mode="reg";
